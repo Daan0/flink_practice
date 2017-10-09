@@ -1,14 +1,16 @@
 package org.apache.flink.quickstart
 import org.apache.flink.streaming.api.scala._
-
-
 import java.util.{Calendar, TimeZone}
+
 import com.dataartisans.flinktraining.exercises.datastream_java.sources.TaxiRideSource
 import com.dataartisans.flinktraining.exercises.datastream_java.utils.GeoUtils
+import com.dataartisans.flinktraining.exercises.datastream_scala.windows.PopularPlaces.GridCellMatcher
+import org.apache.flink.api.common.functions.MapFunction
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.scala.{StreamExecutionEnvironment, _}
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.util.Collector
+import sun.awt.SunHints.Key
 
 object AirportTrends extends App {
 
@@ -34,14 +36,46 @@ object AirportTrends extends App {
   val env = StreamExecutionEnvironment.getExecutionEnvironment
   env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
 
-  // get the taxi ride data stream - Note: you got to change the path to your local data file
-  env.addSource(new TaxiRideSource("data/nycTaxiRides.gz", 60, 2000)) ;
+  // get the taxi ride data stream
+  val rides = env.addSource(new TaxiRideSource("/home/dknoo/IdeaProjects/flinkscalaproject/src/data/nycTaxiRides.gz", 60, 2000)) ;
+
+  val ridesTerminal = rides
+    .map(new GridCellMatcher)
+    // partition by cell id and event type
+    .keyBy( k => k )
+    // filter out rides that are not starting or ending at a terminal
+    .filter(k => gridToTerminal(k._1) != Terminal_404)
+    // map grid id to terminal
+    .map(k => gridToTerminal(k._1))
+    // partition again for event time
+    .keyBy(k => k)
+    // build tumbling window
+    .timeWindow(Time.hours(1))
+    // count events in window
+    .apply{ (key: (Terminal), window, vals, out: Collector[(Terminal, Int, Long)]) =>
+      out.collect( (key, vals.size, window.getEnd)) }
+    // map longtime to hour
+    .map(new LongTimetoHour)
+
+  ridesTerminal.print()
+
+
+  env.execute()
 
   /**
-    * Write Your application here
-    */
+  * Map longtime values to hours
+  */
+  class LongTimetoHour extends MapFunction[(Terminal, Int, Long), (Terminal, Int, Int)] {
 
-  env.execute();
+    def map(trend: (Terminal, Int, Long)): (Terminal, Int, Int) = {
+      val calendar = Calendar.getInstance()
+      calendar.setTimeZone(TimeZone.getTimeZone("America/New_York"))
+      calendar.setTimeInMillis(trend._3)
+      (trend._1, trend._2, calendar.get(Calendar.HOUR_OF_DAY))
+    }
+  }
 
 }
+
+
 
