@@ -14,7 +14,7 @@ import org.apache.flink.streaming.api.scala.{StreamExecutionEnvironment, _}
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.util.Collector
 
-object AirportTopTerminals extends App {
+object AirportTrends extends App {
 
 
   sealed trait Terminal{def grid: Int};
@@ -54,52 +54,43 @@ object AirportTopTerminals extends App {
     .timeWindow(Time.hours(1))
     // count events in window
     .apply{ (key: (Terminal), window, vals, out: Collector[(Terminal, Int, Long)]) =>
-      out.collect( (key, vals.size, window.getEnd)) }
+    out.collect( (key, vals.size, window.getEnd)) }
     // map longtime to hour
     .map(new LongTimeToHour)
-    // aggregate events per terminal per hour
-    .timeWindowAll(Time.hours(1))
-    // take the terminal with maximum amount of events in an hour.
-    .maxBy(1)
 
   ridesTerminal.print()
 
 
   env.execute()
-  /**
-    * Map taxi ride to grid cell and event type.
-    * Start records use departure location, end record use arrival location.
-    */
-  class GridCellMatcher extends MapFunction[TaxiRide, (Int, Boolean)] {
+}
+/**
+  * Map taxi ride to grid cell and event type.
+  * Start records use departure location, end record use arrival location.
+  */
+class GridCellMatcher extends MapFunction[TaxiRide, (Int, Boolean)] {
 
-    def map(taxiRide: TaxiRide): (Int, Boolean) = {
-      if (taxiRide.isStart) {
-        // get grid cell id for start location
-        val gridId: Int = GeoUtils.mapToGridCell(taxiRide.startLon, taxiRide.startLat)
-        (gridId, true)
-      } else {
-        // get grid cell id for end location
-        val gridId: Int = GeoUtils.mapToGridCell(taxiRide.endLon, taxiRide.endLat)
-        (gridId, false)
-      }
+  def map(taxiRide: TaxiRide): (Int, Boolean) = {
+    if (taxiRide.isStart) {
+      // get grid cell id for start location
+      val gridId: Int = GeoUtils.mapToGridCell(taxiRide.startLon, taxiRide.startLat)
+      (gridId, true)
+    } else {
+      // get grid cell id for end location
+      val gridId: Int = GeoUtils.mapToGridCell(taxiRide.endLon, taxiRide.endLat)
+      (gridId, false)
     }
   }
-
-  /**
-    * Map longtime values to hours
-    */
-  class LongTimeToHour extends MapFunction[(Terminal, Int, Long), (Terminal, Int, Int)] {
-
-    def map(trend: (Terminal, Int, Long)): (Terminal, Int, Int) = {
-      val calendar = Calendar.getInstance()
-      calendar.setTimeZone(TimeZone.getTimeZone("America/New_York"))
-      calendar.setTimeInMillis(trend._3)
-      (trend._1, trend._2, calendar.get(Calendar.HOUR_OF_DAY))
-    }
-  }
-
 }
 
+/**
+  * Map longtime values to hours
+  */
+class LongTimeToHour extends MapFunction[(Terminal, Int, Long), (Terminal, Int, Int)] {
 
-
-
+  def map(trend: (Terminal, Int, Long)): (Terminal, Int, Int) = {
+    val calendar = Calendar.getInstance()
+    calendar.setTimeZone(TimeZone.getTimeZone("America/New_York"))
+    calendar.setTimeInMillis(trend._3)
+    (trend._1, trend._2, calendar.get(Calendar.HOUR_OF_DAY))
+  }
+}
